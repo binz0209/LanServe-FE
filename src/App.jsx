@@ -17,7 +17,7 @@ import Portfolio from './pages/freelancer/Portfolio'
 import Reviews from './pages/freelancer/Reviews'
 import Login from './pages/auth/Login'
 import Register from './pages/auth/Register'
-
+import DbTest from "./pages/DbTest";
 
 export default function App() {
   return (
@@ -25,6 +25,8 @@ export default function App() {
       <Navbar />
       <main className="flex-1">
         <Routes>
+          <Route path="/db-test" element={<DbTest />} />
+
           <Route path="/" element={<Home />} />
           <Route path="/how-it-works" element={<HowItWorks />} />
           <Route path="/projects" element={<Projects />} />
