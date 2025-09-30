@@ -1,19 +1,99 @@
-import SkillBar from '../../components/SkillBar'
+import { useEffect, useState } from "react";
+import axios from "../../lib/axios";
+import SkillBar from "../../components/SkillBar";
+import { jwtDecode } from "jwt-decode";
+
 export default function Profile() {
-    return (
-        <div className="grid lg:grid-cols-3 gap-6">
-            <div className="space-y-6">
-                <div className="card p-5"><div className="font-semibold">Thông tin cá nhân</div>
-                    <div className="mt-3 text-sm grid gap-2"><div>Họ và tên: <b>Nguyễn Minh Anh</b></div><div>Email: minhanh@example.com</div><div>SĐT: 0912 345 678</div><div>Website: minh-anh.dev</div></div></div>
-                <div className="card p-5"><div className="font-semibold mb-3">Ngôn ngữ</div><div className="flex gap-2 flex-wrap"><span className="badge">Tiếng Việt</span><span className="badge">English</span><span className="badge">日本語</span></div></div>
-                <div className="card p-5"><div className="font-semibold mb-3">Chứng chỉ</div><ul className="text-sm space-y-2"><li>AWS Certified Developer</li><li>Google UX Design Certificate</li><li>Meta Frontend Certificate</li></ul></div>
+  const [profile, setProfile] = useState(null);
+  const [skills, setSkills] = useState([]);
+
+  useEffect(() => {
+    // const token = localStorage.getItem("token");
+    const token =
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjY4ZGFjNmU1OTYzODk1Njc0OTUzYjZhMiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6Im5ndXllbnZhbmFAZXhhbXBsZS5jb20iLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL3JvbGUiOiJmcmVlbGFuY2VyIiwiZXhwIjoxNzU5MjIxMDc2LCJpc3MiOiJMYW5TZXJ2ZSIsImF1ZCI6IkxhblNlcnZlQ2xpZW50In0.QjPDSBO-BHo3EIxwx6VBVKpkuzJExdJ4e5rjEtIW9O0";
+    if (!token) return;
+
+    // Giải mã token để lấy userId
+    const decoded = jwtDecode(token);
+    const userId =
+      decoded[
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"
+      ];
+    // tuỳ backend bạn trả claim nào
+
+    axios
+      .get(`/userprofiles/by-user/${userId}`)
+      .then(async (res) => {
+        setProfile(res.data);
+
+        // 👇 thêm bước resolve skillIds thành skill names
+        if (res.data.skillIds?.length > 0) {
+          const sres = await axios.post("/skills/resolve", res.data.skillIds);
+          setSkills(sres.data); // [{id, name}]
+        }
+      })
+      .catch((err) => console.error(err));
+  }, []);
+
+  if (!profile) return <p className="p-4">Đang tải hồ sơ...</p>;
+
+  return (
+    <div className="grid lg:grid-cols-3 gap-6">
+      {/* Thông tin cá nhân */}
+      <div className="space-y-6">
+        <div className="card p-5">
+          <div className="font-semibold">Thông tin cá nhân</div>
+          <div className="mt-3 text-sm grid gap-2">
+            <div>
+              Chức danh: <b>{profile.title}</b>
             </div>
-            <div className="lg:col-span-2 space-y-6">
-                <div className="card p-5"><div className="font-semibold mb-3">Giới thiệu</div><p className="text-sm text-slate-700">Passionate developer đam mê web & mobile. Luôn sẵn sàng học hỏi công nghệ mới.</p></div>
-                <div className="card p-5"><div className="flex items-center justify-between"><div className="font-semibold">Kỹ năng chuyên môn</div><button className="btn btn-outline">+ Thêm kỹ năng</button></div>
-                    <div className="mt-4 space-y-3"><SkillBar label="Figma" value={95} /><SkillBar label="React" value={90} /><SkillBar label="Node.js" value={85} /><SkillBar label="TypeScript" value={80} /></div></div>
-                <div className="card p-5"><div className="font-semibold mb-3">Dự án gần đây</div><ul className="list-disc list-inside text-sm text-slate-700 space-y-1"><li>E-commerce Website Redesign • Hoàn thành • 15.000.000đ</li><li>Mobile App UI/UX • Đang thực hiện • 8.000.000đ</li></ul></div>
-            </div>
+            <div>Nơi ở: {profile.location ?? "Chưa cập nhật"}</div>
+            <div>Rate: {profile.hourlyRate ?? "-"} VND/h</div>
+          </div>
         </div>
-    )
+
+        <div className="card p-5">
+          <div className="font-semibold mb-3">Ngôn ngữ</div>
+          <div className="flex gap-2 flex-wrap">
+            {profile.languages?.map((lang, i) => (
+              <span key={i} className="badge">
+                {lang}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="card p-5">
+          <div className="font-semibold mb-3">Chứng chỉ</div>
+          <ul className="text-sm space-y-2">
+            {profile.certifications?.map((c, i) => (
+              <li key={i}>{c}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      {/* Giới thiệu & kỹ năng */}
+      <div className="lg:col-span-2 space-y-6">
+        <div className="card p-5">
+          <div className="font-semibold mb-3">Giới thiệu</div>
+          <p className="text-sm text-slate-700">{profile.bio}</p>
+        </div>
+
+        <div className="card p-5">
+          <div className="flex items-center justify-between">
+            <div className="font-semibold">Kỹ năng chuyên môn</div>
+            <button className="btn btn-outline">+ Thêm kỹ năng</button>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {skills.map((s) => (
+              <span key={s.id} className="badge">
+                {s.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
