@@ -1,4 +1,4 @@
-import { Outlet, NavLink } from "react-router-dom";
+import { Outlet, NavLink, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import axios from "../../lib/axios";
 import { jwtDecode } from "jwt-decode";
@@ -6,36 +6,35 @@ import { jwtDecode } from "jwt-decode";
 export default function AccountLayout() {
   const [profile, setProfile] = useState(null);
   const [rating, setRating] = useState({ avg: "-", count: 0 });
+  const location = useLocation();
+  const search = location.search || "";
 
   useEffect(() => {
-    const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjY4ZGFjNmU1OTYzODk1Njc0OTUzYjZhMiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6Im5ndXllbnZhbmFAZXhhbXBsZS5jb20iLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL3JvbGUiOiJmcmVlbGFuY2VyIiwiZXhwIjoxNzU5MjQ3NjgxLCJpc3MiOiJMYW5TZXJ2ZSIsImF1ZCI6IkxhblNlcnZlQ2xpZW50In0.1kW7yyuv5sYAhUbDGHjAE9V7oXvk5kA_8Z60rCBH7Q8";
+    const token = localStorage.getItem("token");
     if (!token) return;
 
     const decoded = jwtDecode(token);
     const userId =
-      decoded[
-        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"
-      ];
+      decoded["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"];
 
-    // 1. UserProfile
+    // 1) Hồ sơ: MERGE thay vì overwrite
     axios
       .get(`/userprofiles/by-user/${userId}`)
-      .then((res) => setProfile(res.data))
+      .then((res) => {
+        setProfile((prev) => ({ ...(prev || {}), ...res.data }));
+      })
       .catch((err) => console.error("Profile error:", err));
 
-    // 2. User (fullName)
+    // 2) Thông tin user (fullName): cũng MERGE
     axios
       .get("/users/me")
-      .then((res) =>
-        setProfile((prev) =>
-          prev
-            ? { ...prev, fullName: res.data.fullName }
-            : { fullName: res.data.fullName }
-        )
-      )
+      .then((res) => {
+        const fullName = res.data?.fullName ?? res.data?.name ?? "";
+        setProfile((prev) => ({ ...(prev || {}), fullName }));
+      })
       .catch((err) => console.error("User error:", err));
 
-    // 3. Reviews (rating)
+    // 3) Reviews (rating)
     axios
       .get(`/reviews/by-user/${userId}`)
       .then((res) => {
@@ -47,6 +46,8 @@ export default function AccountLayout() {
           );
           const avg = total / reviews.length;
           setRating({ avg: avg.toFixed(1), count: reviews.length });
+        } else {
+          setRating({ avg: "-", count: 0 });
         }
       })
       .catch((err) => console.error("Review error:", err));
@@ -66,11 +67,12 @@ export default function AccountLayout() {
       <div className="card overflow-hidden">
         <div className="h-28 bg-gradient-to-r from-blue-600 to-orange-500" />
 
-        {/* Thông tin user */}
         <div className="p-5 flex items-center justify-between">
           <div>
             <div className="text-xl font-semibold">
-              {profile.fullName ?? "Người dùng ẩn"}
+              {profile.fullName && profile.fullName.trim()
+                ? profile.fullName
+                : "Người dùng ẩn"}
               <span className="badge badge-success ml-2">Đã xác thực</span>
             </div>
             <div className="text-sm text-slate-600">
@@ -86,16 +88,13 @@ export default function AccountLayout() {
           <button className="btn btn-outline">Chỉnh sửa hồ sơ</button>
         </div>
 
-        {/* Tabs */}
         <div className="px-5 border-t border-slate-100">
           <nav className="flex gap-2 overflow-x-auto">
             {tabs.map((t) => (
               <NavLink
                 key={t.to}
-                to={t.to}
-                className={({ isActive }) =>
-                  `tab ${isActive ? "tab-active" : ""}`
-                }
+                to={{ pathname: t.to, search }}
+                className={({ isActive }) => `tab ${isActive ? "tab-active" : ""}`}
               >
                 {t.label}
               </NavLink>

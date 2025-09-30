@@ -1,38 +1,39 @@
 import { useEffect, useState } from "react";
-import axios from "../../lib/axios";
-import SkillBar from "../../components/SkillBar";
+import api from "../../lib/api";
 import { jwtDecode } from "jwt-decode";
 
 export default function Profile() {
   const [profile, setProfile] = useState(null);
   const [skills, setSkills] = useState([]);
+  const [isOwner, setIsOwner] = useState(false);
 
   useEffect(() => {
-    // const token = localStorage.getItem("token");
-    const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjY4ZGFjNmU1OTYzODk1Njc0OTUzYjZhMiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6Im5ndXllbnZhbmFAZXhhbXBsZS5jb20iLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL3JvbGUiOiJmcmVlbGFuY2VyIiwiZXhwIjoxNzU5MjQ3NjgxLCJpc3MiOiJMYW5TZXJ2ZSIsImF1ZCI6IkxhblNlcnZlQ2xpZW50In0.1kW7yyuv5sYAhUbDGHjAE9V7oXvk5kA_8Z60rCBH7Q8";
-    if (!token) return;
-
-    // Giải mã token để lấy userId
-    const decoded = jwtDecode(token);
-    const userId =
-      decoded[
-        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"
-      ];
-    // tuỳ backend bạn trả claim nào
-
-    axios
-      .get(`/userprofiles/by-user/${userId}`)
-      .then(async (res) => {
+    const token = localStorage.getItem("token");
+    console.log("Profile token:", token);
+  
+    let currentUserId = null;
+    if (token) {
+      const decoded = jwtDecode(token);
+      currentUserId =
+        decoded.sub ||
+        decoded["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"] ||
+        decoded.userId;
+      console.log("Decoded userId:", currentUserId);
+    }
+  
+    if (!currentUserId) return;
+  
+    api.get(`/api/userprofiles/by-user/${currentUserId}`)
+      .then((res) => {
+        console.log("Profile data:", res.data);
         setProfile(res.data);
-
-        // 👇 thêm bước resolve skillIds thành skill names
-        if (res.data.skillIds?.length > 0) {
-          const sres = await axios.post("/skills/resolve", res.data.skillIds);
-          setSkills(sres.data); // [{id, name}]
-        }
+        setIsOwner(res.data.userId === currentUserId);
       })
-      .catch((err) => console.error(err));
+      .catch((err) => {
+        console.error("Get profile error:", err.response?.data || err.message);
+      });
   }, []);
+  
 
   if (!profile) return <p className="p-4">Đang tải hồ sơ...</p>;
 

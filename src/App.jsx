@@ -20,18 +20,17 @@ import Register from "./pages/auth/Register";
 import DbTest from "./pages/DbTest";
 
 import { Toaster } from "sonner";
-import { useAuthStore } from "./store/auth";
 
-// Chặn route khi chưa login
+// Chặn route khi chưa login (đọc trực tiếp localStorage)
 function PrivateRoute({ children }) {
-  const token = useAuthStore((s) => s.token);
+  const token = localStorage.getItem("token");
   return token ? children : <Navigate to="/login" replace />;
 }
 
 // Chặn route khi đã login
 function GuestOnly({ children }) {
-  const token = useAuthStore((s) => s.token);
-  return token ? <Navigate to="/account/profile" replace /> : children;
+  const token = localStorage.getItem("token");
+  return token ? <Navigate to="/" replace /> : children;
 }
 
 export default function App() {

@@ -1,18 +1,33 @@
 import axios from "axios";
 
 const api = axios.create({
-    baseURL: "http://localhost:5070/api",
-    headers: {
-        "Content-Type": "application/json"
-    }
+  baseURL: "http://localhost:5070/api",
+  headers: {
+    "Content-Type": "application/json",
+  },
 });
 
-api.interceptors.request.use((config) => {
+api.interceptors.request.use(
+  (config) => {
     const token = localStorage.getItem("token");
     if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
+      config.headers = config.headers || {};
+      config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
-});
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    // tránh app crash khi API fail
+    console.error("API error:", err?.response || err.message);
+    return Promise.reject(err);
+  }
+);
 
 export default api;
