@@ -1,5 +1,25 @@
 import Button from '../components/ui/button'
+import { useEffect, useState } from 'react'
+import api from '../lib/axios'
+import { useNavigate } from "react-router-dom";
+
 export default function Home() {
+    const [categories, setCategories] = useState([]);
+    const [freelancers, setFreelancers] = useState([]);
+    const navigate = useNavigate();
+
+    useEffect(() => {
+        // load category từ backend
+        api.get("/categories")
+            .then((res) => setCategories(res.data))
+            .catch((err) => console.error("Load categories failed", err));
+
+        // load freelancer nổi bật (cần BE có GetAll UserProfiles)
+        api.get("/userprofiles")
+            .then((res) => setFreelancers(res.data))
+            .catch((err) => console.error("Load freelancers failed", err));
+    }, []);
+
     return (
         <div>
             <section className="bg-gradient-to-r from-blue-50 to-orange-50 border-b">
@@ -9,7 +29,9 @@ export default function Home() {
                         <p className="mt-4 text-slate-600">Tìm kiếm freelancer năng lực hoặc dự án phù hợp. Xây dựng sự nghiệp tự do với LanServe.</p>
                         <div className="mt-6 flex gap-3">
                             <Button> Tìm Freelancer </Button>
-                            <Button variant="outline"> Đăng Dự Án </Button>
+                            <Button variant="outline" onClick={() => navigate("/post-project")}>
+                                Đăng Dự Án
+                            </Button>
                         </div>
                     </div>
                     <div className="h-64 bg-slate-200 rounded-2xl" />
@@ -18,11 +40,10 @@ export default function Home() {
             <section className="container-ld py-12">
                 <h2 className="text-2xl font-semibold">Danh mục dịch vụ</h2>
                 <div className="mt-6 grid md:grid-cols-3 lg:grid-cols-4 gap-5">
-                    {['Thiết kế', 'Lập trình', 'Marketing', 'Dịch thuật', 'Viết lách', 'Nhiếp ảnh', 'SEO', 'Khác'].map(x => (
-                        <div key={x} className="card p-5">
+                    {categories.map((c) => (
+                        <div key={c.id} className="card p-5">
                             <div className="text-xl">📦</div>
-                            <div className="mt-3 font-medium">{x}</div>
-                            <div className="text-sm text-slate-500">Mô tả ngắn danh mục.</div>
+                            <div className="mt-3 font-medium">{c.name}</div>
                         </div>
                     ))}
                 </div>
