@@ -19,6 +19,21 @@ import Login from "./pages/auth/Login";
 import Register from "./pages/auth/Register";
 import DbTest from "./pages/DbTest";
 
+import { Toaster } from "sonner";
+import { useAuthStore } from "./store/auth";
+
+// Chặn route khi chưa login
+function PrivateRoute({ children }) {
+  const token = useAuthStore((s) => s.token);
+  return token ? children : <Navigate to="/login" replace />;
+}
+
+// Chặn route khi đã login
+function GuestOnly({ children }) {
+  const token = useAuthStore((s) => s.token);
+  return token ? <Navigate to="/account/profile" replace /> : children;
+}
+
 export default function App() {
   return (
     <div className="min-h-screen flex flex-col">
@@ -30,9 +45,23 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/how-it-works" element={<HowItWorks />} />
           <Route path="/projects" element={<Projects />} />
-          <Route path="/post-project" element={<NewProject />} />
+          <Route
+            path="/post-project"
+            element={
+              <PrivateRoute>
+                <NewProject />
+              </PrivateRoute>
+            }
+          />
 
-          <Route path="/account" element={<AccountLayout />}>
+          <Route
+            path="/account"
+            element={
+              <PrivateRoute>
+                <AccountLayout />
+              </PrivateRoute>
+            }
+          >
             <Route index element={<Navigate to="profile" replace />} />
             <Route path="profile" element={<Profile />} />
             <Route path="my-projects" element={<MyProjects />} />
@@ -40,8 +69,22 @@ export default function App() {
             <Route path="settings" element={<Settings />} />
           </Route>
 
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
+          <Route
+            path="/login"
+            element={
+              <GuestOnly>
+                <Login />
+              </GuestOnly>
+            }
+          />
+          <Route
+            path="/register"
+            element={
+              <GuestOnly>
+                <Register />
+              </GuestOnly>
+            }
+          />
 
           <Route path="/freelancer" element={<FreelancerLayout />}>
             <Route index element={<Navigate to="intro" replace />} />
@@ -50,6 +93,7 @@ export default function App() {
             <Route path="portfolio" element={<Portfolio />} />
             <Route path="reviews" element={<Reviews />} />
           </Route>
+
           <Route
             path="*"
             element={<div className="container-ld py-24">404</div>}
@@ -57,6 +101,7 @@ export default function App() {
         </Routes>
       </main>
       <Footer />
+      <Toaster richColors position="top-center" />
     </div>
   );
 }
