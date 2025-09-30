@@ -11,10 +11,10 @@ export default function Projects() {
   const [projects, setProjects] = useState([]);
   const [statsBase, setStatsBase] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [skills, setSkills] = useState([]);              // 👈 skills từ DB
+  const [skills, setSkills] = useState([]);              // skills từ DB
   const [currentUserId, setCurrentUserId] = useState(null);
 
-  const [editing, setEditing] = useState(null); // { ...project, skillIds: [] } | null
+  const [editing, setEditing] = useState(null);          // { ...project, skillIds: [] } | null
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
   const [apiError, setApiError] = useState("");
@@ -22,6 +22,14 @@ export default function Projects() {
   const [activeFilter, setActiveFilter] = useState("ALL");
   const [loading, setLoading] = useState(true);
 
+  const [filterCategory, setFilterCategory] = useState("");
+  const [searchText, setSearchText] = useState("");
+
+  const [viewing, setViewing] = useState(null);
+
+  const [confirmJob, setConfirmJob] = useState(null);
+
+  const [currentUserName, setCurrentUserName] = useState("");
   // ===== current user =====
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -33,11 +41,45 @@ export default function Projects() {
         dec["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"] ||
         dec.userId ||
         null;
+      const name =
+        dec.name ||
+        dec.username ||
+        dec.unique_name ||
+        dec.preferred_username ||
+        dec.email || // fallback email
+        null;
       setCurrentUserId(id);
+      setCurrentUserName(name);
     } catch (e) {
       console.error("Decode token error:", e);
     }
   }, []);
+
+  // ====== filter client-side theo search + category ======
+  const filteredProjects = useMemo(() => {
+    return projects.filter((p) => {
+      // filter category
+      if (filterCategory && p.categoryId !== filterCategory) return false;
+
+      // search text (bỏ dấu + lowercase)
+      if (searchText.trim()) {
+        const txt = removeDiacritics(searchText);
+        const title = removeDiacritics(p.title || "");
+        const desc = removeDiacritics(p.description || "");
+        if (!title.includes(txt) && !desc.includes(txt)) return false;
+      }
+
+      return true;
+    });
+  }, [projects, filterCategory, searchText]);
+
+
+  function removeDiacritics(str) {
+    return str
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+  }
 
   // ===== categories & skills =====
   useEffect(() => {
@@ -61,11 +103,14 @@ export default function Projects() {
     else req = axios.get(`projects/status/${activeFilter}`);
 
     req.then(res => setProjects(res.data || []))
-       .catch(err => console.error("Load projects error:", err))
-       .finally(() => setLoading(false));
+      .catch(err => console.error("Load projects error:", err))
+      .finally(() => setLoading(false));
   }, [activeFilter]);
 
-  const catName = useCallback((id) => categories.find((c) => c.id === id)?.name || "Khác", [categories]);
+  const catName = useCallback(
+    (id) => categories.find((c) => c.id === id)?.name || "Khác",
+    [categories]
+  );
 
   // map skillIds -> names
   const skillNameMap = useMemo(() => {
@@ -74,20 +119,25 @@ export default function Projects() {
     return map;
   }, [skills]);
 
-  const namesFromIds = useCallback((ids = []) => {
-    return ids.map((id) => skillNameMap.get(id)).filter(Boolean);
-  }, [skillNameMap]);
+  const namesFromIds = useCallback(
+    (ids = []) => ids.map((id) => skillNameMap.get(id)).filter(Boolean),
+    [skillNameMap]
+  );
 
   const startEdit = (p) => {
-    if (p.ownerId !== currentUserId) return;
+    if (p.ownerId !== currentUserId) return; // chỉ owner được sửa
     setErrors({});
     setApiError("");
-    // BE của bạn có thể trả p.skillIds hoặc p.skillNames; ưu tiên skillIds, fallback map từ names
+
+    // chuẩn hoá skillIds từ project
     let skillIds = Array.isArray(p.skillIds) ? p.skillIds : [];
     if (!skillIds.length && Array.isArray(p.skillNames) && skills.length) {
       const nameToId = new Map(skills.map((s) => [s.name.toLowerCase(), s.id]));
-      skillIds = p.skillNames.map((n) => nameToId.get((n || "").toLowerCase())).filter(Boolean);
+      skillIds = p.skillNames
+        .map((n) => nameToId.get((n || "").toLowerCase()))
+        .filter(Boolean);
     }
+
     setEditing({
       id: p.id,
       ownerId: p.ownerId,
@@ -96,9 +146,31 @@ export default function Projects() {
       budgetAmount: p.budgetAmount ?? 0,
       status: p.status || "Open",
       categoryId: p.categoryId || "",
-      skillIds,                                   // 👈 lưu theo ID
+      skillIds,
       createdAt: p.createdAt || null,
       updatedAt: p.updatedAt || null,
+    });
+  };
+
+  // ➕ Tạo mới
+  const startCreate = () => {
+    if (!currentUserId) {
+      alert("Bạn chưa đăng nhập!");
+      return;
+    }
+    setErrors({});
+    setApiError("");
+    setEditing({
+      id: null, // không có id -> save() sẽ POST
+      ownerId: currentUserId,
+      title: "",
+      description: "",
+      budgetAmount: 0,
+      status: "Open",
+      categoryId: "",
+      skillIds: [],
+      createdAt: null,
+      updatedAt: null,
     });
   };
 
@@ -119,47 +191,75 @@ export default function Projects() {
   const save = async () => {
     if (!editing) return;
     if (!validate()) return;
+
     try {
       setSaving(true);
       setApiError("");
 
-      // 1) update project
-      const payload = {
-        id: editing.id,
-        ownerId: editing.ownerId,
-        title: editing.title,
-        description: editing.description,
-        budgetAmount: Number(editing.budgetAmount),
-        status: editing.status,
-        categoryId: editing.categoryId,
-        // không gửi skillNames ở đây; sẽ sync ProjectSkill riêng
-        createdAt: editing.createdAt ?? null,
-        updatedAt: new Date().toISOString(),
-      };
-      const res = await axios.put(`projects/${editing.id}`, payload);
-      const updated = res.data ?? payload;
+      let savedProject;
 
-      // 2) sync ProjectSkill theo IDs
-      // BE endpoint (đề nghị):
-      // POST /api/projectskills/sync
-      // body: { projectId: string, skillIds: string[] }
-      try {
-        const ids = Array.isArray(editing.skillIds) ? editing.skillIds : [];
-        await axios.post("projectskills/sync", {
-          projectId: editing.id,
-          skillIds: ids,
-        });
-        // cập nhật lại hiển thị kỹ năng cho project (cả ids lẫn names hiển thị)
-        updated.skillIds = ids;
-        updated.skillNames = namesFromIds(ids);
-      } catch (syncErr) {
-        console.warn("Sync project skills warning:", syncErr?.response || syncErr);
-        // vẫn cho lưu project, chỉ cảnh báo
+      if (!editing.id) {
+        // ====== CREATE (POST) ======
+        const payloadCreate = {
+          ownerId: editing.ownerId,
+          title: editing.title,
+          description: editing.description,
+          budgetAmount: Number(editing.budgetAmount),
+          status: editing.status,
+          categoryId: editing.categoryId,
+        };
+        const res = await axios.post("projects", payloadCreate); // POST /api/projects
+        savedProject = res.data ?? payloadCreate;
+
+        // đồng bộ skills
+        if (Array.isArray(editing.skillIds)) {
+          try {
+            await axios.post("projectskills/sync", {
+              projectId: editing.id || savedProject.id,
+              skillIds: editing.skillIds || [],
+            });
+
+            // gán skillIds/skillNames vào chính project object để UI render
+            savedProject.skillIds = editing.skillIds || [];
+            savedProject.skillNames = namesFromIds(savedProject.skillIds);
+          } catch (syncErr) {
+            console.warn("Sync project skills warning:", syncErr?.response || syncErr);
+          }
+
+        }
+
+        // cập nhật UI
+        setProjects((prev) => [{ ...savedProject }, ...prev]);
+        setStatsBase((prev) => [{ ...savedProject }, ...prev]);
+      } else {
+        // ====== UPDATE (PUT) ======
+        const payloadUpdate = {
+          id: editing.id,
+          ownerId: editing.ownerId,
+          title: editing.title,
+          description: editing.description,
+          budgetAmount: Number(editing.budgetAmount),
+          status: editing.status,
+          categoryId: editing.categoryId,
+          updatedAt: new Date().toISOString(),
+        };
+        const res = await axios.put(`projects/${editing.id}`, payloadUpdate);
+        savedProject = res.data ?? payloadUpdate;
+
+        try {
+          await axios.post("projectskills/sync", {
+            projectId: editing.id,
+            skillIds: editing.skillIds || [],
+          });
+          savedProject.skillIds = editing.skillIds || [];
+          savedProject.skillNames = namesFromIds(savedProject.skillIds);
+        } catch (syncErr) {
+          console.warn("Sync project skills (update) warning:", syncErr?.response || syncErr);
+        }
+
+        setProjects((prev) => prev.map((p) => (p.id === editing.id ? { ...p, ...savedProject } : p)));
+        setStatsBase((prev) => prev.map((p) => (p.id === editing.id ? { ...p, ...savedProject } : p)));
       }
-
-      // cập nhật list & stats
-      setProjects((prev) => prev.map((p) => (p.id === editing.id ? { ...p, ...updated } : p)));
-      setStatsBase((prev) => prev.map((p) => (p.id === editing.id ? { ...p, ...updated } : p)));
 
       closeEdit();
     } catch (err) {
@@ -169,12 +269,25 @@ export default function Projects() {
         err?.response?.data ||
         err?.message ||
         "Lưu thất bại";
-      console.error("Update project error:", err?.response || err);
+      console.error("Save project error:", err?.response || err);
       setApiError(typeof msg === "string" ? msg : "Không lưu được thay đổi.");
     } finally {
       setSaving(false);
     }
   };
+
+  // ===== View modal helpers =====
+  const openView = (p) => {
+    const isIds = Array.isArray(p.skillIds) && p.skillIds.length > 0;
+    const resolvedSkills = isIds ? namesFromIds(p.skillIds) : (p.skillNames || []);
+    setViewing({
+      ...p,
+      resolvedSkills,
+      categoryName: catName(p.categoryId),
+      isOwner: p.ownerId === currentUserId,
+    });
+  };
+  const closeView = () => setViewing(null);
 
   const countOpen = statsBase.filter((p) => p.status === "Open").length;
   const countInProgress = statsBase.filter((p) => p.status === "InProgress").length;
@@ -186,12 +299,34 @@ export default function Projects() {
     <div className="container-ld py-8 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Dự án cần tuyển Freelancer</h1>
-        <Button>+ Dự án mới</Button>
+        <Button onClick={startCreate}>+ Dự án mới</Button>
       </div>
 
-      <div className="card p-5">
-        <SearchBar />
+      <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+        {/* Search */}
+        <input
+          type="text"
+          className="input w-full md:w-1/2"
+          placeholder="Tìm dự án theo tiêu đề hoặc mô tả..."
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+        />
+
+        {/* Filter theo danh mục */}
+        <select
+          className="select"
+          value={filterCategory}
+          onChange={(e) => setFilterCategory(e.target.value)}
+        >
+          <option value="">— Tất cả danh mục —</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
       </div>
+
 
       {/* Filters clickable */}
       <div className="grid md:grid-cols-5 gap-4">
@@ -213,10 +348,10 @@ export default function Projects() {
       {/* List */}
       {loading ? (
         <div className="card p-6">Đang tải dự án…</div>
-      ) : projects.length === 0 ? (
+      ) : filteredProjects.length === 0 ? (
         <div className="card p-6">Không có dự án phù hợp.</div>
       ) : (
-        projects.map((p) => {
+        filteredProjects.map((p) => {
           const isOwner = p.ownerId === currentUserId;
           const shownSkills =
             Array.isArray(p.skillIds) && p.skillIds.length
@@ -245,28 +380,42 @@ export default function Projects() {
                     </div>
                   </div>
                 </div>
-
-                <div className="mt-4 grid md:grid-cols-2 gap-4 text-sm items-center">
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span>Trạng thái</span>
-                      <span className="badge badge-outline">{p.status}</span>
-                    </div>
-                    <Progress value={p.status === "Completed" ? 100 : p.status === "InProgress" ? 60 : 10} />
+                <div className="mt-4 flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2">
+                    <span>Trạng thái:</span>
+                    <span
+                      className={`font-semibold ${p.status === "Open"
+                        ? "text-green-600"
+                        : p.status === "InProgress"
+                          ? "text-blue-600"
+                          : p.status === "Completed"
+                            ? "text-gray-600"
+                            : "text-red-600"
+                        }`}
+                    >
+                      {p.status}
+                    </span>
                   </div>
-                  <div className="text-right text-xs text-slate-500">
+                  <div className="text-xs text-slate-500">
                     Đăng lúc: {p.createdAt ? new Date(p.createdAt).toLocaleString("vi-VN") : "—"}
                   </div>
                 </div>
 
                 <div className="mt-4 flex gap-2">
-                  <Button variant="outline">Xem</Button>
+                  <Button variant="outline" onClick={() => openView(p)}>Xem</Button>
                   {isOwner ? (
-                    <Button variant="outline" onClick={() => startEdit(p)}>
-                      Chỉnh sửa
-                    </Button>
+                    <Button variant="outline" onClick={() => startEdit(p)}>Chỉnh sửa</Button>
                   ) : (
-                    <Button variant="outline">Nhận job</Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        console.log("Project full object:", p); // debug
+                        setConfirmJob(p);
+                      }}
+                    >
+                      Nhận job
+                    </Button>
+
                   )}
                 </div>
               </div>
@@ -278,15 +427,133 @@ export default function Projects() {
       <div className="text-center">
         <Button variant="outline">Xem thêm dự án</Button>
       </div>
+      {/* ===== Modal xác nhận nhận job ===== */}
+      {confirmJob && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40"
+            onClick={() => setConfirmJob(null)}
+          />
+          <div className="fixed left-1/2 top-1/2 z-50 w-[min(96vw,480px)] -translate-x-1/2 -translate-y-1/2">
+            <div className="rounded-2xl bg-white shadow-2xl border border-slate-200">
 
-      {/* ===== Modal chỉnh sửa ===== */}
+              {/* Header */}
+              <div className="p-4 border-b flex items-center justify-between">
+                <div className="font-semibold">Ứng tuyển dự án</div>
+                <button
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => setConfirmJob(null)}
+                >✕</button>
+              </div>
+
+              {/* Body */}
+              <div className="p-5 space-y-4">
+                <p>Bạn đang ứng tuyển vào dự án <b>{confirmJob.title}</b></p>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Cover Letter</label>
+                  <textarea
+                    className="textarea textarea-bordered w-full"
+                    rows={3}
+                    value={confirmJob.coverLetter || ""}
+                    onChange={(e) =>
+                      setConfirmJob({ ...confirmJob, coverLetter: e.target.value })
+                    }
+                    placeholder="Viết vài dòng giới thiệu về bạn..."
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Bid Amount</label>
+                  <input
+                    type="number"
+                    className="input input-bordered w-full"
+                    value={confirmJob.bidAmount || ""}
+                    onChange={(e) =>
+                      setConfirmJob({ ...confirmJob, bidAmount: e.target.value })
+                    }
+                    placeholder={`Theo budget của dự án: ${confirmJob.budgetAmount || "0"}$`}
+                  />
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t flex items-center justify-end gap-2">
+                <Button variant="outline" onClick={() => setConfirmJob(null)}>Hủy</Button>
+                <Button
+                  onClick={async () => {
+                    try {
+                      const cover = (confirmJob.coverLetter || "").trim()
+                        || "Tôi quan tâm đến dự án này và muốn ứng tuyển.";
+
+                      // nếu bỏ trống bid -> theo budgetAmount của project
+                      const numericBid = confirmJob.bidAmount === "" || confirmJob.bidAmount == null
+                        ? (confirmJob.budgetAmount ?? null)
+                        : Number(confirmJob.bidAmount);
+
+                      const bid = Number.isFinite(numericBid) && numericBid > 0
+                        ? numericBid
+                        : (confirmJob.budgetAmount ?? null);
+
+                      // 1) Tạo proposal
+                      const proposalPayload = {
+                        projectId: confirmJob.id || confirmJob._id,
+                        freelancerId: currentUserId,
+                        coverLetter: cover,
+                        bidAmount: bid,         // có thể null -> BE hiểu là theo budget
+                        status: "Pending",
+                        createdAt: new Date().toISOString()
+                      };
+                      console.log("Proposal payload:", proposalPayload);
+
+                      const { data: createdProposal } = await axios.post("proposals", proposalPayload);
+
+                      // ID trả về có thể là id hoặc Id tuỳ config JSON
+                      const createdProposalId = createdProposal?.id || createdProposal?.Id;
+
+                      // 2) Tạo message “proposal”
+                      const messagePayload = {
+                        projectId: confirmJob.id || confirmJob._id,
+                        proposalId: createdProposalId,
+                        clientId: confirmJob.ownerId,
+                        freelancerId: currentUserId,
+                        projectTitle: confirmJob.title,
+                        clientName: confirmJob.ownerName || "",       // nếu có
+                        freelancerName: currentUserName || "",
+                        coverLetter: cover,
+                        bidAmount: bid
+                      };
+                      console.log("Message(proposal) payload:", messagePayload);
+
+                      await axios.post("messages/proposal", messagePayload);
+
+                      alert("Đã gửi proposal và tin nhắn tới chủ dự án.");
+                    } catch (err) {
+                      console.error("Proposal error:", err?.response || err);
+                      alert(err?.response?.data?.detail || "Không thể gửi proposal. Thử lại sau.");
+                    } finally {
+                      setConfirmJob(null);
+                    }
+                  }}
+                >
+                  Gửi proposal
+                </Button>
+
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+
+      {/* ===== Modal tạo/sửa ===== */}
       {editing && (
         <>
           <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" onClick={closeEdit} />
           <div className="fixed left-1/2 top-1/2 z-50 w-[min(96vw,760px)] -translate-x-1/2 -translate-y-1/2">
             <div className="rounded-2xl bg-white shadow-2xl border border-slate-200">
               <div className="p-4 border-b flex items-center justify-between">
-                <div className="font-semibold">Chỉnh sửa dự án</div>
+                <div className="font-semibold">{editing.id ? "Chỉnh sửa dự án" : "Tạo dự án mới"}</div>
                 <button className="btn btn-sm btn-ghost" onClick={closeEdit}>✕</button>
               </div>
 
@@ -390,8 +657,75 @@ export default function Projects() {
                   Hủy
                 </Button>
                 <Button onClick={save} disabled={saving}>
-                  {saving ? "Đang lưu..." : "Lưu thay đổi"}
+                  {saving ? "Đang lưu..." : editing.id ? "Lưu thay đổi" : "Tạo dự án"}
                 </Button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ===== Modal XEM CHI TIẾT ===== */}
+      {viewing && (
+        <>
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" onClick={closeView} />
+          <div className="fixed left-1/2 top-1/2 z-50 w-[min(96vw,760px)] -translate-x-1/2 -translate-y-1/2">
+            <div className="rounded-2xl bg-white shadow-2xl border border-slate-200">
+              <div className="p-4 border-b flex items-center justify-between">
+                <div className="font-semibold">Chi tiết dự án</div>
+                <button className="btn btn-sm btn-ghost" onClick={closeView}>✕</button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-xl font-semibold">{viewing.title}</div>
+                    <div className="mt-2 text-sm text-slate-600">{viewing.description}</div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className="badge">{viewing.categoryName}</span>
+                      {(viewing.resolvedSkills || []).map((s) => (
+                        <span key={s} className="badge badge-outline">{s}</span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="text-right min-w-[160px]">
+                    <div className="text-xs uppercase tracking-wide text-slate-500">Ngân sách</div>
+                    <div className="text-brand-700 font-semibold">
+                      {viewing.budgetAmount?.toLocaleString("vi-VN") ?? "—"} đ
+                    </div>
+                    <div className="mt-2 text-xs text-slate-600">
+                      Trạng thái: <span className="badge badge-outline">{viewing.status}</span>
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      Đăng lúc: {viewing.createdAt ? new Date(viewing.createdAt).toLocaleString("vi-VN") : "—"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 border-t flex items-center justify-end gap-2">
+                {viewing.isOwner ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      closeView();
+                      startEdit(viewing);
+                    }}
+                  >
+                    Chỉnh sửa
+                  </Button>
+                ) : (
+                  <Button variant="outline" onClick={() => setConfirmJob({
+                    projectId: p.id,
+                    title: p.title,
+                    clientId: p.ownerId
+                  })}>
+                    Nhận job
+                  </Button>
+                )}
+                <Button onClick={closeView}>Đóng</Button>
               </div>
             </div>
           </div>
