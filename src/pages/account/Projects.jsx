@@ -24,6 +24,7 @@ export default function Projects() {
 
   const [filterCategory, setFilterCategory] = useState("");
   const [searchText, setSearchText] = useState("");
+  const [sortOrder, setSortOrder] = useState("newest");
 
   const [viewing, setViewing] = useState(null);
 
@@ -57,21 +58,29 @@ export default function Projects() {
 
   // ====== filter client-side theo search + category ======
   const filteredProjects = useMemo(() => {
-    return projects.filter((p) => {
-      // filter category
+    const getTime = (p) => {
+      const t = new Date(p.createdAt || p.updatedAt || 0).getTime();
+      return Number.isFinite(t) ? t : 0;
+    };
+
+    const list = projects.filter((p) => {
       if (filterCategory && p.categoryId !== filterCategory) return false;
 
-      // search text (bỏ dấu + lowercase)
       if (searchText.trim()) {
         const txt = removeDiacritics(searchText);
         const title = removeDiacritics(p.title || "");
         const desc = removeDiacritics(p.description || "");
         if (!title.includes(txt) && !desc.includes(txt)) return false;
       }
-
       return true;
     });
-  }, [projects, filterCategory, searchText]);
+
+    // sort by date
+    return list.sort((a, b) =>
+      sortOrder === "newest" ? getTime(b) - getTime(a) : getTime(a) - getTime(b)
+    );
+  }, [projects, filterCategory, searchText, sortOrder]);
+
 
 
   function removeDiacritics(str) {
@@ -312,21 +321,32 @@ export default function Projects() {
           onChange={(e) => setSearchText(e.target.value)}
         />
 
-        {/* Filter theo danh mục */}
-        <select
-          className="select"
-          value={filterCategory}
-          onChange={(e) => setFilterCategory(e.target.value)}
-        >
-          <option value="">— Tất cả danh mục —</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </div>
+        <div className="flex gap-3 w-full md:w-auto">
+          {/* Filter theo danh mục */}
+          <select
+            className="select w-full md:w-auto"
+            value={filterCategory}
+            onChange={(e) => setFilterCategory(e.target.value)}
+          >
+            <option value="">— Tất cả danh mục —</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
 
+          {/* NEW: Sort theo ngày */}
+          <select
+            className="select w-full md:w-auto"
+            value={sortOrder}
+            onChange={(e) => setSortOrder(e.target.value)}
+          >
+            <option value="newest">Mới nhất</option>
+            <option value="oldest">Cũ nhất</option>
+          </select>
+        </div>
+      </div>
 
       {/* Filters clickable */}
       <div className="grid md:grid-cols-5 gap-4">
@@ -406,16 +426,14 @@ export default function Projects() {
                   {isOwner ? (
                     <Button variant="outline" onClick={() => startEdit(p)}>Chỉnh sửa</Button>
                   ) : (
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        console.log("Project full object:", p); // debug
-                        setConfirmJob(p);
-                      }}
-                    >
-                      Nhận job
-                    </Button>
-
+                    p.status === "Open" && (
+                      <Button
+                        variant="outline"
+                        onClick={() => setConfirmJob(p)}
+                      >
+                        Nhận job
+                      </Button>
+                    )
                   )}
                 </div>
               </div>
@@ -717,13 +735,16 @@ export default function Projects() {
                     Chỉnh sửa
                   </Button>
                 ) : (
-                  <Button variant="outline" onClick={() => setConfirmJob({
-                    projectId: p.id,
-                    title: p.title,
-                    clientId: p.ownerId
-                  })}>
-                    Nhận job
-                  </Button>
+                  viewing.status === "Open" && (
+                    <Button variant="outline" onClick={() => setConfirmJob({
+                      projectId: p.id,
+                      title: p.title,
+                      clientId: p.ownerId
+                    })}>
+                      Nhận job
+                    </Button>
+
+                  )
                 )}
                 <Button onClick={closeView}>Đóng</Button>
               </div>
