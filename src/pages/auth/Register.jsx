@@ -2,19 +2,35 @@ import { useState } from "react";
 import Input from "../../components/ui/input";
 import Button from "../../components/ui/button";
 import { Link, useNavigate } from "react-router-dom";
+import api from "../../lib/axios";
+import { toast } from "sonner";
 
 export default function Register() {
   const nav = useNavigate();
   const [form, setForm] = useState({ name: "", email: "", password: "", confirm: "" });
   const [err, setErr] = useState("");
 
-  const onSubmit = (e) => {
+  const onSubmit = async (e) => {
     e.preventDefault();
+    setErr("");
     if (!form.name || !form.email || !form.password || !form.confirm)
       return setErr("Vui lòng nhập đủ thông tin.");
-    if (form.password !== form.confirm) return setErr("Mật khẩu xác nhận không khớp.");
-    // TODO: Gọi API đăng ký thật sau này
-    nav("/account/profile");
+    if (form.password !== form.confirm)
+      return setErr("Mật khẩu xác nhận không khớp.");
+    try {
+      const res = await api.post("/auth/register", {
+        fullName: form.name,
+        email: form.email,
+        password: form.password,
+        role: "User",
+      });
+      localStorage.setItem("token", res.data.accessToken);
+      toast.success("Đăng ký thành công!");
+      nav("/account/profile");
+    } catch (err) {
+      console.error("Register failed:", err);
+      setErr(err.response?.data?.message || "Đăng ký thất bại.");
+    }
   };
 
   return (
