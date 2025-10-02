@@ -6,6 +6,7 @@ import { jwtDecode } from "jwt-decode";
 export default function AccountLayout() {
   const [profile, setProfile] = useState(null);
   const [rating, setRating] = useState({ avg: "-", count: 0 });
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
   const location = useLocation();
   const search = location.search || "";
 
@@ -15,17 +16,17 @@ export default function AccountLayout() {
 
     const decoded = jwtDecode(token);
     const userId =
-      decoded["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"];
+      decoded[
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"
+      ];
 
-    // 1) Hồ sơ: MERGE thay vì overwrite
+    // Lấy hồ sơ
     axios
       .get(`/userprofiles/by-user/${userId}`)
-      .then((res) => {
-        setProfile((prev) => ({ ...(prev || {}), ...res.data }));
-      })
+      .then((res) => setProfile((prev) => ({ ...(prev || {}), ...res.data })))
       .catch((err) => console.error("Profile error:", err));
 
-    // 2) Thông tin user (fullName): cũng MERGE
+    // Lấy thông tin user
     axios
       .get("/users/me")
       .then((res) => {
@@ -34,7 +35,7 @@ export default function AccountLayout() {
       })
       .catch((err) => console.error("User error:", err));
 
-    // 3) Reviews (rating)
+    // Lấy review -> tính rating
     axios
       .get(`/reviews/by-user/${userId}`)
       .then((res) => {
@@ -53,14 +54,14 @@ export default function AccountLayout() {
       .catch((err) => console.error("Review error:", err));
   }, []);
 
+  if (!profile) return <p className="p-4">Đang tải...</p>;
+
   const tabs = [
     { to: "profile", label: "Hồ sơ cá nhân" },
     { to: "my-projects", label: "Dự án của tôi" },
     { to: "messages", label: "Tin nhắn" },
     { to: "settings", label: "Cài đặt" },
   ];
-
-  if (!profile) return <p className="p-4">Đang tải...</p>;
 
   return (
     <div className="container-ld py-8">
@@ -85,7 +86,12 @@ export default function AccountLayout() {
               {rating.count > 0 ? `(${rating.count} đánh giá)` : ""}
             </div>
           </div>
-          <button className="btn btn-outline">Chỉnh sửa hồ sơ</button>
+          <button
+            className="btn btn-outline"
+            onClick={() => setIsEditingProfile((prev) => !prev)}
+          >
+            {isEditingProfile ? "Hủy chỉnh sửa" : "Chỉnh sửa hồ sơ"}
+          </button>
         </div>
 
         <div className="px-5 border-t border-slate-100">
@@ -94,7 +100,9 @@ export default function AccountLayout() {
               <NavLink
                 key={t.to}
                 to={{ pathname: t.to, search }}
-                className={({ isActive }) => `tab ${isActive ? "tab-active" : ""}`}
+                className={({ isActive }) =>
+                  `tab ${isActive ? "tab-active" : ""}`
+                }
               >
                 {t.label}
               </NavLink>
@@ -104,7 +112,8 @@ export default function AccountLayout() {
       </div>
 
       <div className="mt-6">
-        <Outlet />
+        {/* Truyền state edit xuống Profile */}
+        <Outlet context={{ isEditingProfile, setIsEditingProfile }} />
       </div>
     </div>
   );
