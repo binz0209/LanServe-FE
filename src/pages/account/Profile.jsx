@@ -22,7 +22,6 @@ export default function Profile() {
     }
   
     if (!currentUserId) return;
-  
     api.get(`/api/userprofiles/by-user/${currentUserId}`)
       .then((res) => {
         console.log("Profile data:", res.data);

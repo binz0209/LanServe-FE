@@ -4,6 +4,8 @@ import Button from "../../components/ui/button";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../../lib/axios";
 import { toast } from "sonner";
+import { GoogleLogin } from "@react-oauth/google";
+
 
 export default function Register() {
   const nav = useNavigate();
@@ -30,6 +32,19 @@ export default function Register() {
     } catch (err) {
       console.error("Register failed:", err);
       setErr(err.response?.data?.message || "Đăng ký thất bại.");
+    }
+  };
+
+  const handleGoogleSuccess = async (credentialResponse) => {
+    try {
+      const idToken = credentialResponse.credential;
+      const res = await api.post("/auth/google", { idToken });
+      localStorage.setItem("token", res.data.accessToken);
+      toast.success("Đăng nhập bằng Google thành công!");
+      nav("/account/profile");
+    } catch (err) {
+      console.error("Google login failed:", err);
+      toast.error("Đăng nhập Google thất bại.");
     }
   };
 
@@ -81,6 +96,13 @@ export default function Register() {
             />
           </div>
           <Button type="submit" className="w-full">Tạo tài khoản</Button>
+          <div className="text-center text-slate-500">Hoặc</div>
+          <div className="flex justify-center">
+            <GoogleLogin
+              onSuccess={handleGoogleSuccess}
+              onError={() => toast.error("Login Google thất bại")}
+            />
+          </div>
           <div className="text-sm text-center text-slate-600">
             Đã có tài khoản?{" "}
             <Link to="/login" className="text-brand-700 hover:underline">Đăng nhập</Link>
