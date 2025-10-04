@@ -18,6 +18,7 @@ import Reviews from "./pages/freelancer/Reviews";
 import Login from "./pages/auth/Login";
 import Register from "./pages/auth/Register";
 import DbTest from "./pages/DbTest";
+import UserSearch from "./pages/UserSearch";
 
 import { Toaster } from "sonner";
 
@@ -40,7 +41,6 @@ export default function App() {
       <main className="flex-1">
         <Routes>
           <Route path="/db-test" element={<DbTest />} />
-
           <Route path="/" element={<Home />} />
           <Route path="/how-it-works" element={<HowItWorks />} />
           <Route path="/projects" element={<Projects />} />
@@ -52,7 +52,6 @@ export default function App() {
               </PrivateRoute>
             }
           />
-
           <Route
             path="/account"
             element={
@@ -68,6 +67,10 @@ export default function App() {
             <Route path="settings" element={<Settings />} />
           </Route>
 
+          <Route path="/profile/:userId" element={<AccountLayout />}>
+            <Route index element={<Profile />} />
+          </Route>
+          <Route path="/users" element={<UserSearch />} />
           <Route
             path="/login"
             element={
@@ -84,7 +87,6 @@ export default function App() {
               </GuestOnly>
             }
           />
-
           <Route path="/freelancer" element={<FreelancerLayout />}>
             <Route index element={<Navigate to="intro" replace />} />
             <Route path="intro" element={<Intro />} />
@@ -92,7 +94,6 @@ export default function App() {
             <Route path="portfolio" element={<Portfolio />} />
             <Route path="reviews" element={<Reviews />} />
           </Route>
-
           <Route
             path="*"
             element={<div className="container-ld py-24">404</div>}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useOutletContext, useParams } from "react-router-dom";
 import api from "../../lib/api";
 import { jwtDecode } from "jwt-decode";
 
@@ -10,12 +10,15 @@ export default function Profile() {
   const [selectedSkill, setSelectedSkill] = useState("");
   const [isOwner, setIsOwner] = useState(false);
 
-  const { isEditingProfile, setIsEditingProfile } = useOutletContext();
+  const outletContext = useOutletContext?.() || {};
+  const { isEditingProfile, setIsEditingProfile } = outletContext;
+
+  const { userId: viewedUserId } = useParams(); // 👈 nếu có userId => đang xem người khác
 
   useEffect(() => {
     const token = localStorage.getItem("token");
-
     let currentUserId = null;
+
     if (token) {
       const decoded = jwtDecode(token);
       currentUserId =
@@ -26,13 +29,15 @@ export default function Profile() {
         decoded.userId;
     }
 
-    if (!currentUserId) return;
+    const targetUserId = viewedUserId || currentUserId;
+
+    if (!targetUserId) return;
 
     api
-      .get(`/api/userprofiles/by-user/${currentUserId}`)
+      .get(`/api/userprofiles/by-user/${targetUserId}`)
       .then(async (res) => {
         setProfile(res.data);
-        setIsOwner(res.data.userId === currentUserId);
+        setIsOwner(!viewedUserId && res.data.userId === currentUserId);
 
         if (res.data.skillIds?.length > 0) {
           const sres = await api.post("/api/skills/resolve", res.data.skillIds);
@@ -42,16 +47,16 @@ export default function Profile() {
       .catch((err) => {
         console.error("Get profile error:", err.response?.data || err.message);
       });
-  }, []);
+  }, [viewedUserId]);
 
   useEffect(() => {
-    if (isEditingProfile) {
+    if (isEditingProfile && isOwner) {
       api
         .get("/api/skills")
         .then((res) => setAllSkills(res.data))
         .catch((err) => console.error("Load skills error:", err));
     }
-  }, [isEditingProfile]);
+  }, [isEditingProfile, isOwner]);
 
   if (!profile) return <p className="p-4">Đang tải hồ sơ...</p>;
 
@@ -91,13 +96,7 @@ export default function Profile() {
   };
 
   const handleAddSkill = async () => {
-    if (!selectedSkill) return;
-
-    // 🔥 Check skill trùng
-    if (profile.skillIds?.includes(selectedSkill)) {
-      alert("Kỹ năng này đã có rồi!");
-      return;
-    }
+    if (!selectedSkill || profile.skillIds.includes(selectedSkill)) return; // 👈 tránh trùng skill
 
     try {
       const updated = {
@@ -135,6 +134,8 @@ export default function Profile() {
     }
   };
 
+  const isEditing = isOwner && isEditingProfile; // chỉ cho phép edit nếu là chủ
+
   return (
     <div className="grid lg:grid-cols-3 gap-6">
       {/* Thông tin cá nhân */}
@@ -143,7 +144,7 @@ export default function Profile() {
           <div className="font-semibold">Thông tin cá nhân</div>
 
           <div className="mt-3 text-sm grid gap-2">
-            {isEditingProfile ? (
+            {isEditing ? (
               <>
                 <input
                   type="text"
@@ -185,7 +186,7 @@ export default function Profile() {
         {/* Ngôn ngữ */}
         <div className="card p-5">
           <div className="font-semibold mb-3">Ngôn ngữ</div>
-          {isEditingProfile ? (
+          {isEditing ? (
             <div className="flex flex-col gap-2">
               {profile.languages?.map((lang, i) => (
                 <div key={i} className="flex items-center gap-2">
@@ -227,7 +228,7 @@ export default function Profile() {
         {/* Chứng chỉ */}
         <div className="card p-5">
           <div className="font-semibold mb-3">Chứng chỉ</div>
-          {isEditingProfile ? (
+          {isEditing ? (
             <div className="flex flex-col gap-2">
               {profile.certifications?.map((c, i) => (
                 <div key={i} className="flex items-center gap-2">
@@ -269,7 +270,7 @@ export default function Profile() {
       <div className="lg:col-span-2 space-y-6">
         <div className="card p-5">
           <div className="font-semibold mb-3">Giới thiệu</div>
-          {isEditingProfile ? (
+          {isEditing ? (
             <textarea
               name="bio"
               value={profile.bio || ""}
@@ -285,7 +286,7 @@ export default function Profile() {
         <div className="card p-5">
           <div className="flex items-center justify-between">
             <div className="font-semibold">Kỹ năng chuyên môn</div>
-            {isEditingProfile && (
+            {isEditing && (
               <div className="flex gap-2">
                 <select
                   className="select"
@@ -305,11 +306,12 @@ export default function Profile() {
               </div>
             )}
           </div>
+
           <div className="mt-4 flex flex-wrap gap-2">
             {skills.map((s) => (
               <span key={s.id} className="badge flex items-center gap-1">
                 {s.name}
-                {isEditingProfile && (
+                {isEditing && (
                   <button
                     className="ml-1 text-red-500"
                     onClick={() => handleRemoveSkill(s.id)}
@@ -324,7 +326,7 @@ export default function Profile() {
       </div>
 
       {/* Nút lưu */}
-      {isEditingProfile && (
+      {isEditing && (
         <div className="lg:col-span-3 text-right">
           <button className="btn btn-primary" onClick={handleSave}>
             Lưu thay đổi
