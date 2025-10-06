@@ -1,6 +1,7 @@
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import Button from "./ui/button";
 import { jwtDecode } from "jwt-decode";
+import { MessageSquare, User } from "lucide-react"; // 👈 import icon
 
 export default function Navbar() {
   const nav = useNavigate();
@@ -22,7 +23,7 @@ export default function Navbar() {
     }
   }
 
-  const item = "px-3 py-2 rounded-lg hover:bg-slate-100 text-sm";
+  const item = "px-3 py-2 rounded-lg hover:bg-slate-100 text-sm flex items-center gap-1";
   const linkClass = ({ isActive }) =>
     `${item} ${isActive ? "text-brand-700 font-medium" : "text-slate-700"}`;
 
@@ -57,13 +58,13 @@ export default function Navbar() {
           {token ? (
             <>
               <NavLink to="/account/messages" className={linkClass}>
-                💬
+                <MessageSquare className="w-5 h-5" /> {/* 👈 icon message mới */}
               </NavLink>
               <NavLink
                 to={`/account/profile${userId ? `?id=${userId}` : ""}`}
                 className={linkClass}
               >
-                👤 Tài khoản
+                <User className="w-5 h-5" /> Tài khoản
               </NavLink>
               <Button onClick={onLogout}>Đăng xuất</Button>
             </>
