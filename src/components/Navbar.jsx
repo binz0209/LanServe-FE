@@ -49,6 +49,9 @@ export default function Navbar() {
           <NavLink to="/post-project" className={linkClass}>
             Đăng dự án
           </NavLink>
+          <NavLink to="/users" className={linkClass}>
+            Người dùng
+          </NavLink>
           <NavLink to="/how-it-works" className={linkClass}>
             Cách hoạt động
           </NavLink>
