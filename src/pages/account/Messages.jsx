@@ -1,21 +1,21 @@
+// src/pages/Messages.jsx
 import { useEffect, useState, useRef, useMemo } from "react";
 import { jwtDecode } from "jwt-decode";
-import DOMPurify from "dompurify"; // npm i dompurify
+import DOMPurify from "dompurify";
 import api from "../../lib/api";
 import EmptyState from "../../components/EmptyState";
 
-// Nếu cần lấy projectId từ conversationKey khi gửi tin
+// Helper: tách key thành projectId / receiverId / senderId
 const parseKey = (key = "") => {
   const [projectId = "null", receiverId = "", senderId = ""] = String(key).split(":");
   return { projectId, receiverId, senderId };
 };
 
-// ---- Helper: normalize Mongo Extended JSON -> object phẳng cho FE ----
+// Helper: chuẩn hóa Mongo Extended JSON -> object phẳng
 function normalizeMessage(m = {}) {
   const getOid = (o) => (o && o.$oid) || o || null;
   const getDate = (d) => {
     if (!d) return null;
-    // Hỗ trợ: {$date: {$numberLong: "1759269348500"}} hoặc {$date: "2025-10-01T...Z"} hoặc timestamp số
     const raw = (d.$date && (d.$date.$numberLong || d.$date)) || d;
     const n = Number(raw);
     try {
@@ -24,7 +24,6 @@ function normalizeMessage(m = {}) {
       return new Date().toISOString();
     }
   };
-
   return {
     id: getOid(m._id) || m.id || crypto.randomUUID(),
     conversationKey: m.conversationKey || "",
@@ -37,31 +36,101 @@ function normalizeMessage(m = {}) {
   };
 }
 
-// ---- Helper: xác định chuỗi có phải HTML không ----
 const isHtml = (s) => typeof s === "string" && /^\s*</.test(s);
 
-// ---- Helper: gọi API hành động proposal trong HTML embed ----
+// ---- API hành động Proposal ----
 async function handleProposalAction(action, proposalId, projectId) {
-  // Điều chỉnh route theo BE của bạn
-  const url = `api/proposals/${proposalId}/${action}`;
+  const url = `api/Proposals/${proposalId}/${action}`; // ✅ viết hoa Proposals
   const payload = { projectId };
   const res = await api.post(url, payload);
   return res.data;
 }
 
+// ---- API chỉnh sửa Proposal ----
+async function handleProposalEdit(proposalId, price) {
+  const url = `api/Proposals/${proposalId}/edit`; // ✅ viết hoa Proposals
+  const res = await api.put(url, price, {
+    headers: { "Content-Type": "application/json" },
+  });
+  return res.data;
+}
+
+// ---- Fetch status thật từ API ----
+async function fetchProposalStatus(proposalId) {
+  if (!proposalId) return null;
+  try {
+    const res = await api.get(`api/Proposals/${proposalId}`); // ✅ viết hoa Proposals
+    const status = (res.data?.status || "").trim().toLowerCase();
+    console.log("[Proposal] status:", status);
+    return status;
+  } catch (err) {
+    console.warn("[Proposal] fetch failed:", err.message);
+    return null;
+  }
+}
+
+// ---- Chèn 3 nút nếu status === "pending" ----
+async function withActionButtonsIfPending(safeHtml, currentUserId) {
+  const host = document.createElement("div");
+  host.innerHTML = safeHtml;
+  const card = host.querySelector(".proposal-card");
+  if (!card) return safeHtml;
+
+  const proposalId = card.getAttribute("data-proposal-id");
+  if (!proposalId) return safeHtml;
+
+  const status = await fetchProposalStatus(proposalId);
+  if (status !== "pending") return safeHtml;
+
+  // 🧩 Fetch chi tiết proposal để biết ai là chủ (sender)
+  let ownerId = null;
+  try {
+    const res = await api.get(`api/Proposals/${proposalId}`);
+    ownerId = res.data?.senderId || res.data?.freelancerId || res.data?.createdBy || null;
+  } catch {
+    console.warn(`[Proposal ${proposalId}] cannot fetch owner`);
+  }
+
+  const isOwner = ownerId && ownerId === currentUserId;
+
+  const actions = document.createElement("div");
+  actions.className = "actions flex gap-2 mt-2";
+
+  actions.innerHTML = `
+    ${!isOwner ? `<button data-action="accept" class="btn btn-sm btn-success">✅ Đồng ý</button>` : ""}
+    <button data-action="edit" class="btn btn-sm btn-outline">✏️ Chỉnh sửa</button>
+    <button data-action="cancel" class="btn btn-sm btn-danger">❌ Hủy đề xuất</button>
+  `;
+  card.appendChild(actions);
+
+  return host.innerHTML;
+}
+
 export default function Messages() {
-  // STATE
-  const [usersMap, setUsersMap] = useState(new Map()); // id -> user
-  const [conversations, setConversations] = useState([]); // {conversationKey, partnerId, ...}
+  const [usersMap, setUsersMap] = useState(new Map());
+  const [conversations, setConversations] = useState([]);
   const [activeUser, setActiveUser] = useState(null);
   const [activeConversationKey, setActiveConversationKey] = useState(null);
-
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState(null);
 
-  // REF + auto-stick
+  // Modal edit
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingProposalId, setEditingProposalId] = useState(null);
+  const [editingProjectId, setEditingProjectId] = useState(null);
+  const [newPrice, setNewPrice] = useState("");
+  const [editLoading, setEditLoading] = useState(false);
+
+  // 🆕 Contract modal
+  const [showContractModal, setShowContractModal] = useState(false);
+  const [contractData, setContractData] = useState(null);
+
+  // 🆕 Cancel confirm (nếu bạn muốn confirm)
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [cancelProposalId, setCancelProposalId] = useState("");
+
   const containerRef = useRef(null);
   const [autoStick, setAutoStick] = useState(true);
 
@@ -73,18 +142,15 @@ export default function Messages() {
     setAutoStick(atBottom);
   };
 
-  // Auto scroll xuống đáy khi có tin mới / đổi user (nếu đang bám đáy)
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     if (autoStick) el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
   }, [messages, activeUser, autoStick]);
 
-  // Lấy current user từ JWT
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return setLoading(false);
-
     try {
       const decoded = jwtDecode(token);
       const id =
@@ -100,31 +166,20 @@ export default function Messages() {
     }
   }, []);
 
-  // Load conversations và users
   useEffect(() => {
     if (!currentUserId) return;
-
     const load = async () => {
       try {
-        // 1) Danh sách hội thoại của user
-        // Nên dùng all lower-case để nhất quán route
         const { data: convs } = await api.get("api/messages/my-conversations");
         const list = Array.isArray(convs) ? convs : [];
-        console.log("Conversations from API:", list);
         setConversations(list);
 
-        // 2) Lấy thông tin user đối tác
         const { data: allUsers } = await api.get("api/users");
         const newMap = new Map(
-          (allUsers || []).map((u) => {
-            const key = u.id || u._id || u.userId; // bắt mọi biến thể
-            return [key, u];
-          })
+          (allUsers || []).map((u) => [u.id || u._id || u.userId, u])
         );
         setUsersMap(newMap);
-        console.log("UsersMap:", Array.from(newMap.entries()));
 
-        // 3) Auto chọn conv đầu tiên nếu chưa có
         if (!activeUser && list.length > 0) {
           const first = list[0];
           const firstPartner = newMap.get(first.partnerId);
@@ -134,39 +189,83 @@ export default function Messages() {
           }
         }
       } catch (err) {
-        console.error("Load conversations error:", err?.response?.data || err?.message);
-        setConversations([]);
+        console.error("Load conversations error:", err);
       }
     };
-
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUserId]);
 
-  // Load thread theo conversationKey, normalize dữ liệu
+  // Load thông tin Project (tên + chủ project)
+  const [projectsMap, setProjectsMap] = useState(new Map());
+
+  useEffect(() => {
+    const loadProjects = async () => {
+      const ids = new Set();
+      (conversations || []).forEach((c) => {
+        const [pid] = String(c.conversationKey).split(":");
+        if (pid && pid !== "null") ids.add(pid);
+      });
+      if (ids.size === 0) return;
+
+      const newMap = new Map(projectsMap);
+      for (const pid of ids) {
+        if (newMap.has(pid)) continue;
+        try {
+          const res = await api.get(`api/projects/${pid}`);
+          const proj = res.data || {};
+          const title = proj.title || proj.name || proj.projectName || "(Không tên)";
+          const owner =
+            proj.ownerName ||
+            proj.createdByName ||
+            proj.owner?.fullName ||
+            "(Chưa rõ)";
+          newMap.set(pid, { title, owner });
+        } catch {
+          newMap.set(pid, { title: "(Không tìm thấy)", owner: "" });
+        }
+      }
+      setProjectsMap(newMap);
+    };
+
+    loadProjects();
+  }, [conversations]);
+
+  const loadThread = async (key) => {
+    if (!key) return;
+    const res = await api.get(`api/messages/thread/${key}`);
+    const normalized = (res.data || []).map(normalizeMessage);
+
+    // thêm xử lý fetch status + allow contract-id
+    const enriched = await Promise.all(
+      normalized.map(async (m) => {
+        if (!isHtml(m.text)) return m;
+        const safeHtml = DOMPurify.sanitize(m.text, {
+          ALLOW_DATA_ATTR: true,
+          ADD_ATTR: [
+            "data-action",
+            "data-proposal-id",
+            "data-project-id",
+            "data-status",
+            "data-proposal-status",
+            "data-contract-id", // ✅ để xem hợp đồng
+          ],
+        });
+        const finalHtml = await withActionButtonsIfPending(safeHtml, currentUserId);
+        return { ...m, finalHtml };
+      })
+    );
+
+    setMessages(enriched);
+  };
+
   useEffect(() => {
     if (!activeConversationKey || !currentUserId) return;
-    api
-      .get(`api/messages/thread/${activeConversationKey}`)
-      .then((res) => {
-        const raw = Array.isArray(res.data) ? res.data : [];
-        const normalized = raw.map(normalizeMessage);
-        console.log("Thread normalized:", normalized);
-        setMessages(normalized);
-
-        // bám đáy sau khi đổi cuộc chat
-        setTimeout(() => {
-          const el = containerRef.current;
-          if (el) el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
-        }, 0);
-      })
-      .catch((err) => {
-        console.error("Messages error:", err.response?.data || err.message);
-        setMessages([]);
-      });
+    loadThread(activeConversationKey).catch((err) =>
+      console.error("Messages error:", err.message)
+    );
   }, [activeConversationKey, currentUserId]);
 
-  // Event delegation: nghe click nút trong HTML embed (proposal-card)
+  // Event delegation: click trong HTML
   useEffect(() => {
     const root = containerRef.current;
     if (!root) return;
@@ -175,46 +274,85 @@ export default function Messages() {
       const btn = e.target.closest?.("button[data-action]");
       if (!btn || !root.contains(btn)) return;
 
+      // Có card thì lấy, không có thì vẫn xử lý nút
       const card = btn.closest(".proposal-card");
-      if (!card) return;
 
-      const action = btn.getAttribute("data-action"); // accept | reject | cancel
-      const proposalId = card.getAttribute("data-proposal-id");
-      const projectId = card.getAttribute("data-project-id");
-      if (!action || !proposalId) return;
+      const action = btn.getAttribute("data-action");
+      const proposalId = card?.getAttribute("data-proposal-id");
+      const projectId = card?.getAttribute("data-project-id");
 
-      try {
-        btn.disabled = true;
-        console.log("Proposal action:", { action, proposalId, projectId });
-        await handleProposalAction(action, proposalId, projectId);
+      // Một số nút (view-contract) không cần proposalId
+      if (!action) return;
 
-        // Thêm 1 system message nhẹ để feedback
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            senderId: "system",
-            receiverId: currentUserId,
-            text: `Đã ${
-              action === "accept" ? "đồng ý" : action === "reject" ? "từ chối" : "huỷ"
-            } đề xuất #${proposalId}`,
-            createdAt: new Date().toISOString(),
-            isRead: true,
-          },
-        ]);
-      } catch (err) {
-        console.error("Proposal action error:", err?.response?.data || err?.message);
-        alert(`Thao tác thất bại: ${err?.response?.data || err?.message}`);
-      } finally {
-        btn.disabled = false;
+      // ✏️ Chỉnh sửa giá đề xuất
+      if (action === "edit") {
+        if (!proposalId) return;
+        setEditingProposalId(proposalId);
+        setEditingProjectId(projectId || null);
+        setNewPrice("");
+        setShowEditModal(true);
+        return;
+      }
+
+      // ❌ Hủy đề xuất (popup xác nhận)
+      if (action === "cancel") {
+        if (!proposalId) return;
+        if (!confirm("Bạn có chắc muốn hủy đề xuất này không?")) return;
+        try {
+          btn.disabled = true;
+          await api.post(`api/Proposals/${proposalId}/cancel`, { projectId }); // ✅ viết hoa + gửi projectId
+          await loadThread(activeConversationKey);
+        } catch (err) {
+          console.error("Cancel proposal error:", err.message);
+        } finally {
+          btn.disabled = false;
+        }
+        return;
+      }
+
+      // ✅ Đồng ý đề xuất (tạo contract + message nhúng mới)
+      if (action === "accept") {
+        if (!proposalId) return;
+        try {
+          btn.disabled = true;
+          console.log("Accepting proposal:", proposalId, "for project:", projectId);
+          await api.post(`api/Proposals/${proposalId}/accept`, { projectId }); // ✅ viết hoa + gửi projectId
+          await loadThread(activeConversationKey); // reload để thấy message nhúng mới
+          // (tuỳ chọn) await loadConversations(); // nếu cần cập nhật sidebar
+        } catch (err) {
+          console.error("Accept proposal error:", err.message);
+          alert("Không thể chấp nhận đề xuất này.");
+        } finally {
+          btn.disabled = false;
+        }
+        return;
+      }
+
+      // 📄 Xem hợp đồng (hiện popup)
+      if (action === "view-contract") {
+        const contractId =
+          btn.getAttribute("data-contract-id") ||
+          card?.getAttribute("data-contract-id"); // fallback
+        if (!contractId) return;
+        try {
+          btn.disabled = true;
+          const res = await api.get(`api/Contracts/${contractId}`); // ✅ viết hoa Contracts
+          setContractData(res.data || {});
+          setShowContractModal(true);
+        } catch (err) {
+          console.error("View contract error:", err.message);
+          alert("Không tải được thông tin hợp đồng.");
+        } finally {
+          btn.disabled = false;
+        }
+        return;
       }
     };
 
     root.addEventListener("click", onClick);
     return () => root.removeEventListener("click", onClick);
-  }, [containerRef, currentUserId]);
+  }, [containerRef, currentUserId, activeConversationKey]);
 
-  // Gửi tin nhắn text (giữ nguyên parse projectId từ key nếu có)
   const sendMessage = async () => {
     if (!text.trim() || !activeUser || !currentUserId) return;
     try {
@@ -224,43 +362,79 @@ export default function Messages() {
         text,
         projectId: projectId && projectId !== "null" ? projectId : null,
       });
-
-      const saved =
-        res.data ||
-        normalizeMessage({
-          _id: { $oid: crypto.randomUUID() },
-          conversationKey: activeConversationKey,
-          senderId: currentUserId,
-          receiverId: activeUser.id || activeUser._id || activeUser.userId,
-          text,
-          createdAt: { $date: Date.now() },
-          isRead: true,
-        });
-
+      const saved = res.data || normalizeMessage({
+        _id: { $oid: crypto.randomUUID() },
+        conversationKey: activeConversationKey,
+        senderId: currentUserId,
+        receiverId: activeUser.id || activeUser._id || activeUser.userId,
+        text,
+        createdAt: { $date: Date.now() },
+        isRead: true,
+      });
       setMessages((prev) => [...prev, saved]);
       setText("");
     } catch (err) {
-      console.error("Send message error:", err.response?.data || err.message);
+      console.error("Send message error:", err.message);
     }
   };
 
-  // Sidebar items: dùng partnerId từ BE, không tự parse key để tìm partner
+  const submitEdit = async () => {
+    const n = Number(newPrice);
+    if (!editingProposalId) return;
+    if (!Number.isFinite(n) || n <= 0) {
+      alert("Giá không hợp lệ");
+      return;
+    }
+
+    try {
+      setEditLoading(true);
+      const res = await handleProposalEdit(editingProposalId, n);
+      const updated = res?.proposal || {};
+      const pid = updated.id || updated.Id || editingProposalId;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          senderId: "system",
+          receiverId: currentUserId,
+          text: `Đã cập nhật giá đề xuất #${pid} → ${n.toLocaleString()}`,
+          createdAt: new Date().toISOString(),
+          isRead: true,
+        },
+      ]);
+      setShowEditModal(false);
+      setEditingProposalId(null);
+      setNewPrice("");
+      await loadThread(activeConversationKey);
+    } catch (err) {
+      alert(`Chỉnh sửa thất bại: ${err.message}`);
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  // Sidebar
   const sidebarItems = useMemo(() => {
-    const items = (conversations || []).map((c) => {
-      const partner = usersMap.get(c.partnerId) || null;
+    return (conversations || []).map((c) => {
+      const partner = usersMap.get(c.partnerId) || {};
+      const [projectId] = String(c.conversationKey).split(":");
+      const pInfo = projectsMap.get(projectId) || {};
+      const projectName = pInfo.title || "Đang tải...";
+      const partnerName = partner.fullName || partner.email || c.partnerId;
+
       return {
         conversationKey: c.conversationKey,
         partnerId: c.partnerId,
-        partnerName: partner?.fullName || partner?.email || c.partnerId,
+        projectId,
+        projectName,
+        partnerName,
         lastMessage: c.lastMessage || "",
         lastAt: c.lastAt ? new Date(c.lastAt) : null,
         unreadCount: c.unreadCount || 0,
         userObj: partner,
       };
     });
-    console.log("SidebarItems:", items);
-    return items;
-  }, [conversations, usersMap]);
+  }, [conversations, usersMap, projectsMap]);
 
   if (loading) return <p className="p-4">Đang tải...</p>;
 
@@ -269,83 +443,71 @@ export default function Messages() {
       {/* Sidebar */}
       <div className="lg:col-span-1 card p-4">
         <div className="font-semibold mb-3">Đoạn chat</div>
-        {sidebarItems.length === 0 ? (
-          <EmptyState title="Chưa có đoạn chat nào" />
-        ) : (
-          <div className="space-y-2">
-            {sidebarItems.map((it) => (
-              <div
-                key={it.conversationKey || it.partnerId}
-                onClick={() => {
-                  if (it.userObj) {
-                    setActiveUser(it.userObj);
-                    setActiveConversationKey(it.conversationKey);
-                    setMessages([]);
-                  }
-                }}
-                className={`cursor-pointer p-3 rounded-xl border flex items-start gap-3 ${
-                  activeUser?.id === it.partnerId || activeUser?._id === it.partnerId
-                    ? "border-brand-600 bg-brand-50"
-                    : "border-slate-200 hover:bg-slate-50"
-                }`}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="font-medium truncate">👤 {it.partnerName}</div>
-                    {it.lastAt && (
-                      <div className="text-xs text-slate-500 shrink-0">
-                        {it.lastAt.toLocaleString()}
-                      </div>
-                    )}
-                  </div>
-                  <div className="text-sm text-slate-600 truncate">
-                    {it.lastMessage || "—"}
-                  </div>
+        {sidebarItems.map((it) => (
+          <div
+            key={it.conversationKey}
+            onClick={() => {
+              setActiveUser(it.userObj);
+              setActiveConversationKey(it.conversationKey);
+              setMessages([]);
+            }}
+            className={`cursor-pointer p-3 rounded-xl border transition-colors duration-150 ${activeConversationKey === it.conversationKey
+                ? "border-brand-700 bg-blue-100 text-blue-900"
+                : "border-slate-200 hover:bg-slate-50 text-slate-700"
+              }`}
+          >
+            <div className="font-medium truncate text-base">
+              📁 <strong>{it.projectName}</strong>
+              <span className="italic text-slate-500"> — {it.partnerName}</span>
+              {it.lastAt && (
+                <div className="text-xs text-slate-500 shrink-0">
+                  {(() => {
+                    const diffMs = Date.now() - it.lastAt.getTime();
+                    const diffHours = diffMs / (1000 * 60 * 60);
+
+                    if (diffHours < 24) {
+                      return it.lastAt.toLocaleTimeString("vi-VN", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: false,
+                      }); // hh:mm
+                    }
+
+                    const diffDays = Math.floor(diffHours / 24);
+                    return diffDays === 1
+                      ? "1 ngày trước"
+                      : `${diffDays} ngày trước`;
+                  })()}
                 </div>
-                {it.unreadCount > 0 && (
-                  <span className="badge badge-primary shrink-0">{it.unreadCount}</span>
-                )}
-              </div>
-            ))}
+              )}
+            </div>
           </div>
-        )}
+        ))}
       </div>
 
-      {/* Main chat */}
+      {/* Chat */}
       <div className="lg:col-span-2 card p-4 flex flex-col">
         {activeUser ? (
-          <div className="flex-1 flex flex-col">
+          <>
             <div className="font-semibold mb-3">
               Đang chat với {activeUser.fullName || activeUser.email}
             </div>
-
-            {/* Khung chat cố định */}
             <div className="border rounded-lg bg-slate-50 p-4 h-[400px] flex flex-col">
-              <div
-                ref={containerRef}
-                onScroll={onScroll}
-                className="flex-1 overflow-y-auto space-y-3 overscroll-contain"
-              >
+              <div ref={containerRef} onScroll={onScroll} className="flex-1 overflow-y-auto space-y-3">
                 {messages.length === 0 ? (
                   <EmptyState title="Chưa có tin nhắn nào" />
                 ) : (
                   messages.map((m) => {
                     const isMine = m.senderId === currentUserId;
                     const showHtml = isHtml(m.text);
-                    const safeHtml = showHtml ? DOMPurify.sanitize(m.text) : "";
-
                     return (
                       <div
                         key={m.id}
-                        className={`max-w-[70%] px-4 py-2 rounded-2xl shadow-md border text-slate-900 break-words ${
-                          isMine
-                            ? "ml-auto bg-white border-brand-200"
-                            : "mr-auto bg-white border-slate-200"
-                        }`}
-                        title={m.createdAt ? new Date(m.createdAt).toLocaleString() : ""}
+                        className={`max-w-[70%] px-4 py-2 rounded-2xl shadow-md border ${isMine ? "ml-auto border-brand-200" : "mr-auto border-slate-200"
+                          }`}
                       >
                         {showHtml ? (
-                          <div dangerouslySetInnerHTML={{ __html: safeHtml }} />
+                          <div dangerouslySetInnerHTML={{ __html: m.finalHtml || m.text }} />
                         ) : (
                           m.text
                         )}
@@ -359,7 +521,6 @@ export default function Messages() {
             {/* Input */}
             <div className="mt-3 flex gap-2">
               <input
-                type="text"
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 className="input flex-1"
@@ -370,11 +531,98 @@ export default function Messages() {
                 Gửi
               </button>
             </div>
-          </div>
+          </>
         ) : (
           <EmptyState title="Chọn một đoạn chat để bắt đầu" />
         )}
       </div>
+
+      {/* Modal chỉnh sửa */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-2xl shadow-lg w-full max-w-md">
+            <h2 className="text-lg font-semibold mb-3">Chỉnh sửa giá đề xuất</h2>
+            <input
+              type="number"
+              min="1"
+              className="input w-full mb-3"
+              placeholder="Nhập giá mới..."
+              value={newPrice}
+              onChange={(e) => setNewPrice(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submitEdit()}
+            />
+            <div className="flex justify-end gap-2">
+              <button className="btn btn-outline" onClick={() => setShowEditModal(false)}>
+                Hủy
+              </button>
+              <button className="btn btn-primary" onClick={submitEdit} disabled={editLoading}>
+                {editLoading ? "Đang lưu..." : "Lưu thay đổi"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----- Modal: Confirm cancel (tuỳ chọn) ----- */}
+      {confirmingCancel && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-xl w-full max-w-md">
+            <h2 className="text-base font-semibold mb-2">Hủy đề xuất?</h2>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Thao tác này sẽ xóa thẻ đề xuất hiện tại và tạo một thông báo "Đã hủy" trong đoạn chat.
+            </p>
+            <div className="flex justify-end gap-2 mt-5">
+              <button className="btn" onClick={() => setConfirmingCancel(false)}>Không</button>
+              <button
+                className="btn btn-danger"
+                onClick={async () => {
+                  try {
+                    await api.post(`api/Proposals/${cancelProposalId}/cancel`, { projectId: null });
+                    setConfirmingCancel(false);
+                    setCancelProposalId("");
+                    await loadThread(activeConversationKey);
+                  } catch {
+                    alert("Hủy đề xuất thất bại");
+                  }
+                }}
+              >
+                Đồng ý
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ----- Modal: View contract ----- */}
+      {showContractModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white text-black p-6 rounded-2xl shadow-xl w-full max-w-lg">
+            <h2 className="text-base font-semibold mb-4">Thông tin hợp đồng</h2>
+            <div className="space-y-2 text-sm">
+              <div><b>Mã hợp đồng:</b> {contractData?.id || contractData?._id}</div>
+              <div><b>Project:</b> {contractData?.projectId}</div>
+              <div><b>Client:</b> {contractData?.clientId}</div>
+              <div><b>Freelancer:</b> {contractData?.freelancerId}</div>
+              <div><b>Số tiền:</b> {Number(contractData?.agreedAmount || 0).toLocaleString()} đ</div>
+              <div><b>Trạng thái:</b> {contractData?.status}</div>
+              <div>
+                <b>Ngày tạo:</b>{" "}
+                {contractData?.createdAt
+                  ? new Date(contractData.createdAt).toLocaleString("vi-VN")
+                  : ""}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                className="px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition"
+                onClick={() => setShowContractModal(false)}
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

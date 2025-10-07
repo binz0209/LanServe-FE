@@ -39,7 +39,6 @@ export default function UserSearch() {
       setSkills(skillRes.data);
     } catch (err) {
       console.error("Fetch data error:", err);
-      alert("Không thể tải danh sách người dùng!");
     } finally {
       setLoading(false);
     }
@@ -134,7 +133,7 @@ export default function UserSearch() {
       )}
 
       {!loading && filteredUsers.length === 0 && (
-        <p className="text-slate-500 mt-4">Không tìm thấy người dùng nào.</p>
+        <p className="text-slate-500 mt-4">Hãy Đăng nhập để xem danh sách người dùng.</p>
       )}
     </div>
   );
