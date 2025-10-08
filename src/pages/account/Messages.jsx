@@ -107,6 +107,7 @@ async function withActionButtonsIfPending(safeHtml, currentUserId) {
 }
 
 export default function Messages() {
+  const [payoutLoading, setPayoutLoading] = useState(false);
   const [usersMap, setUsersMap] = useState(new Map());
   const [conversations, setConversations] = useState([]);
   const [activeUser, setActiveUser] = useState(null);
@@ -133,6 +134,20 @@ export default function Messages() {
 
   const containerRef = useRef(null);
   const [autoStick, setAutoStick] = useState(true);
+  // --- Helpers: FE-only check ---
+  async function getProposalAmount(proposalId) {
+    const res = await api.get(`api/Proposals/${proposalId}`); // giữ nguyên pattern "api/..."
+    const amt = res?.data?.bidAmount ?? res?.data?.BidAmount ?? 0;
+    return Number(amt) || 0;
+  }
+
+  async function getMyWalletBalance(userId) {
+    // BE Dev/Test: [HttpGet("{userId}")] => /api/wallets/{userId}
+    const res = await api.get(`api/wallets/${userId}`);
+    // kỳ vọng { balance: number }
+    const bal = res?.data?.balance ?? res?.data?.Balance ?? 0;
+    return Number(bal) || 0;
+  }
 
   const onScroll = () => {
     const el = containerRef.current;
@@ -316,12 +331,54 @@ export default function Messages() {
         try {
           btn.disabled = true;
           console.log("Accepting proposal:", proposalId, "for project:", projectId);
-          await api.post(`api/Proposals/${proposalId}/accept`, { projectId }); // ✅ viết hoa + gửi projectId
-          await loadThread(activeConversationKey); // reload để thấy message nhúng mới
-          // (tuỳ chọn) await loadConversations(); // nếu cần cập nhật sidebar
+
+          // 1️⃣ Lấy giá đề xuất hiện tại
+          const amount = await getProposalAmount(proposalId);
+          if (!Number.isFinite(amount) || amount <= 0) {
+            alert("Giá đề xuất không hợp lệ hoặc không tìm thấy.");
+            return;
+          }
+
+          // 2️⃣ Lấy số dư ví của current user
+          if (!currentUserId) {
+            alert("Không xác định được người dùng hiện tại.");
+            return;
+          }
+          const balance = await getMyWalletBalance(currentUserId);
+
+          // 3️⃣ Kiểm tra đủ tiền
+          if (balance < amount) {
+            const need = (amount - balance).toLocaleString();
+            alert(`Số dư ví không đủ để đồng ý đề xuất.\nThiếu: ${need} đ`);
+            return; // ❌ dừng lại
+          }
+
+          // 4️⃣ Đủ tiền → trừ ví trước
+          const note = `Withdraw for accepted proposal #${proposalId}`;
+          try {
+            await api.post("/api/wallets/change-balance", {
+              Delta: -Math.abs(amount),
+              Note: note,
+            });
+            console.log(`💸 Đã trừ ${amount.toLocaleString()}đ từ ví.`);
+          } catch (err) {
+            console.error("Withdraw failed:", err);
+            alert("Không thể trừ tiền từ ví, vui lòng thử lại sau.");
+            return;
+          }
+
+          // 5️⃣ Sau khi trừ tiền thành công → Gọi accept
+          await api.post(`api/Proposals/${proposalId}/accept`, { projectId });
+          await loadThread(activeConversationKey); // reload thread để thấy message mới
+          alert("Đồng ý đề xuất thành công!");
+
         } catch (err) {
-          console.error("Accept proposal error:", err.message);
-          alert("Không thể chấp nhận đề xuất này.");
+          console.error("Accept proposal error:", err?.message || err);
+          alert(
+            err?.response?.data?.detail ||
+            err?.response?.data?.message ||
+            "Không thể chấp nhận đề xuất này."
+          );
         } finally {
           btn.disabled = false;
         }
@@ -377,7 +434,20 @@ export default function Messages() {
       console.error("Send message error:", err.message);
     }
   };
-
+  async function payoutToFreelancer(freelancerId, amount, contractId) {
+    const amt = Number(amount) || 0;
+    if (amt <= 0) throw new Error("Invalid payout amount");
+    const payload = {
+      toUserId: freelancerId,
+      amount: Math.abs(amt),
+      contractId,
+      note: `Payout for contract #${contractId}`,
+    };
+    // BE phải có endpoint này (ở dưới)
+    const res = await api.post("/api/wallets/payout", payload);
+    return res.data;
+  }
+  
   const submitEdit = async () => {
     const n = Number(newPrice);
     if (!editingProposalId) return;
@@ -452,8 +522,8 @@ export default function Messages() {
               setMessages([]);
             }}
             className={`cursor-pointer p-3 rounded-xl border transition-colors duration-150 ${activeConversationKey === it.conversationKey
-                ? "border-brand-700 bg-blue-100 text-blue-900"
-                : "border-slate-200 hover:bg-slate-50 text-slate-700"
+              ? "border-brand-700 bg-blue-100 text-blue-900"
+              : "border-slate-200 hover:bg-slate-50 text-slate-700"
               }`}
           >
             <div className="font-medium truncate text-base">
@@ -611,7 +681,80 @@ export default function Messages() {
                   : ""}
               </div>
             </div>
+
+            {/* 🔽 Đặt onClick ngay trong nút Xác nhận hoàn thành này */}
             <div className="flex justify-end gap-2 mt-5">
+              {currentUserId &&
+                contractData?.clientId === currentUserId &&
+                contractData?.status === "Active" && (
+                  <button
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-60"
+                    disabled={payoutLoading}
+                    onClick={async () => {
+                      // 👉 Đây chính là đoạn onClick bạn hỏi
+                      if (!confirm("Xác nhận hoàn thành dự án và chuyển tiền cho freelancer?")) return;
+                      try {
+                        setPayoutLoading(true);
+
+                        const amount = Number(contractData?.agreedAmount || 0);
+                        const freelancerId = contractData?.freelancerId;
+                        const contractId = contractData?.id || contractData?._id;
+
+                        if (!freelancerId || !Number.isFinite(amount) || amount <= 0) {
+                          alert("Thiếu thông tin để chuyển tiền.");
+                          return;
+                        }
+                        if (contractData?.status !== "Active") {
+                          alert("Hợp đồng không còn ở trạng thái Active.");
+                          return;
+                        }
+
+                        // 1) 💸 Cộng tiền cho freelancer
+                        await payoutToFreelancer(freelancerId, amount, contractId);
+
+                        // 2) 📝 Cập nhật trạng thái hợp đồng thành Completed
+                        try {
+                          await api.put(`api/Contracts/${contractId}`, {
+                            ...contractData,
+                            status: "Completed",
+                          });
+                        } catch {
+                          await api.put(`api/Contracts/${contractId}`, { status: "Completed" });
+                        }
+
+                        // 3) Cập nhật UI và gửi tin nhắn
+                        setContractData((prev) => ({ ...prev, status: "Completed" }));
+                        setMessages((prev) => [
+                          ...prev,
+                          {
+                            id: crypto.randomUUID(),
+                            senderId: "system",
+                            receiverId: currentUserId,
+                            text: `✅ Hợp đồng #${contractId} đã hoàn thành. Đã chuyển ${amount.toLocaleString()}đ cho freelancer.`,
+                            createdAt: new Date().toISOString(),
+                            isRead: true,
+                          },
+                        ]);
+
+                        alert("Đã xác nhận hoàn thành và chuyển tiền cho freelancer.");
+                        setShowContractModal(false);
+                      } catch (err) {
+                        console.error("Payout/Complete error:", err);
+                        alert(
+                          err?.response?.data?.detail ||
+                          err?.response?.data?.message ||
+                          err?.message ||
+                          "Không thể hoàn tất thanh toán."
+                        );
+                      } finally {
+                        setPayoutLoading(false);
+                      }
+                    }}
+                  >
+                    {payoutLoading ? "Đang chuyển..." : "✅ Xác nhận hoàn thành"}
+                  </button>
+                )}
+
               <button
                 className="px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition"
                 onClick={() => setShowContractModal(false)}
@@ -622,6 +765,7 @@ export default function Messages() {
           </div>
         </div>
       )}
+
 
     </div>
   );

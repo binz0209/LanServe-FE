@@ -44,7 +44,7 @@ export default function WalletPage() {
     fetchBalance,
     loading,
     txns,
-    fetchTransactions,
+    fetchTopups,
     txLoading,
   } = useWalletStore();
 
@@ -55,9 +55,9 @@ export default function WalletPage() {
   useEffect(() => {
     if (userId) {
       fetchBalance(userId);
-      fetchTransactions(userId, 20);
+      fetchTopups(userId, 20);  // ← gọi API topups
     }
-  }, [userId, fetchBalance, fetchTransactions]);
+  }, [userId, fetchBalance, fetchTopups]);
 
   // đọc cờ từ PaymentSuccess đặt sẵn
   useEffect(() => {

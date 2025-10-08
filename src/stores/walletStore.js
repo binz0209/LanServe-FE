@@ -10,6 +10,7 @@ export const useWalletStore = create((set, get) => ({
   txLoading: false,
   txError: null,
 
+  // ===== Lấy số dư ví =====
   fetchBalance: async (userId) => {
     if (!userId) return;
     set({ loading: true, error: null });
@@ -22,19 +23,43 @@ export const useWalletStore = create((set, get) => ({
     }
   },
 
-  fetchTransactions: async (userId, take = 20) => {
+  // ===== Lấy toàn bộ lịch sử giao dịch (mọi type) =====
+  fetchTransactions: async (userId, take = 20, sort = "desc") => {
     if (!userId) return;
     set({ txLoading: true, txError: null });
     try {
-      // BE nên trả về mảng [{ createdAt, type, amount, balanceAfter, note, paymentId, ... }]
-      const res = await api.get(`/api/wallets/history`, { params: { userId, take } });
-      // fallback nếu BE trả fields khác
-      const list = Array.isArray(res.data) ? res.data : (res.data?.items || []);
-      // sort client: mới → cũ
-      list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      const res = await api.get(`/api/wallets/history`, {
+        params: { userId, take, sort },
+      });
+      const list = Array.isArray(res.data)
+        ? res.data
+        : res.data?.items || [];
       set({ txns: list, txLoading: false });
     } catch (e) {
-      set({ txError: e?.message || "Fetch transactions failed", txLoading: false });
+      set({
+        txError: e?.message || "Fetch transactions failed",
+        txLoading: false,
+      });
+    }
+  },
+
+  // ===== Lấy lịch sử nạp tiền (TopUp) =====
+  fetchTopups: async (userId, take = 20, sort = "desc") => {
+    if (!userId) return;
+    set({ txLoading: true, txError: null });
+    try {
+      const res = await api.get(`/api/wallets/topups`, {
+        params: { userId, take, sort },
+      });
+      const list = Array.isArray(res.data)
+        ? res.data
+        : res.data?.items || [];
+      set({ txns: list, txLoading: false });
+    } catch (e) {
+      set({
+        txError: e?.message || "Fetch topup history failed",
+        txLoading: false,
+      });
     }
   },
 }));
