@@ -19,6 +19,9 @@ import Login from "./pages/auth/Login";
 import Register from "./pages/auth/Register";
 import DbTest from "./pages/DbTest";
 import UserSearch from "./pages/UserSearch";
+import WalletPage from "./pages/wallet/WalletPage";
+import PaymentSuccess from "./pages/payment/PaymentSuccess";
+import PaymentFailed from "./pages/payment/PaymentFailed";
 
 import { Toaster } from "sonner";
 
@@ -40,6 +43,9 @@ export default function App() {
       <Navbar />
       <main className="flex-1">
         <Routes>
+          <Route path="/wallet" element={<WalletPage />} />
+          <Route path="/payment-success" element={<PaymentSuccess />} />
+          <Route path="/payment-failed" element={<PaymentFailed />} />
           <Route path="/db-test" element={<DbTest />} />
           <Route path="/" element={<Home />} />
           <Route path="/how-it-works" element={<HowItWorks />} />

@@ -85,6 +85,18 @@ export default function NewProject() {
     return "";
   };
 
+  // NEW: chỉ kiểm tra số dư, không trừ tiền ở bước tạo project
+  async function getWalletBalance(userId) {
+    if (!userId) return 0;
+    try {
+      // BE: GET /api/wallets/{userId} -> { balance }
+      const res = await api.get(`/wallets/${userId}`);
+      return Number(res.data?.balance || 0);
+    } catch {
+      return 0;
+    }
+  }
+
   const handleSubmit = async () => {
     const v = validate();
     if (v) {
@@ -95,23 +107,38 @@ export default function NewProject() {
     try {
       setSubmitting(true);
 
-      // chuẩn hóa deadline → ISO (00:00 local)
-      // Nếu muốn mốc 23:59:59 thì chỉnh new Date(`${deadline}T23:59:59`)
-      const deadlineIso = deadline ? new Date(`${deadline}T00:00:00`).toISOString() : null;
+      const deadlineIso = deadline
+        ? new Date(`${deadline}T00:00:00`).toISOString()
+        : null;
 
       const payload = {
-        ownerId: currentUserId,          // <<<<<< KHÔNG hard-code nữa
+        ownerId: currentUserId,
         title,
         description,
         categoryId: categoryId || null,
-        skillIds: skills,                // BE /projectskills/sync sẽ dùng mảng này nếu bạn muốn
+        skillIds: skills,
         budgetType,
-        budgetAmount: budgetAmount ? Number(budgetAmount) : null,
+        budgetAmount: budgetAmount ? Number(budgetAmount) : 0,
         deadline: deadlineIso,
         status: "Open",
       };
 
-      console.log("Payload gửi:", payload);
+      // ① KIỂM TRA SỐ DƯ (không trừ tiền)
+      const required = Number(payload.budgetAmount || 0);
+      if (payload.budgetType === "Fixed" && required > 0) {
+        const balance = await getWalletBalance(currentUserId);
+        if (balance < required) {
+          alert(
+            `Số dư ví không đủ để chi trả cho dự án này.\n` +
+            `Cần: ${required.toLocaleString("vi-VN")} VND\n` +
+            `Hiện có: ${balance.toLocaleString("vi-VN")} VND\n\n` +
+            `Vui lòng nạp thêm tiền trước khi đăng dự án.`
+          );
+          return; // dừng lại, không tạo project
+        }
+      }
+
+      // ② TẠO PROJECT (không rút tiền ở bước này)
       await api.post("/projects", payload);
 
       alert("Đăng dự án thành công!");
@@ -139,7 +166,6 @@ export default function NewProject() {
       )}
 
       <div className="mt-8 space-y-6">
-
         {/* Thông tin dự án */}
         <div className="card">
           <div className="card-header p-5 font-semibold">Thông tin dự án</div>
